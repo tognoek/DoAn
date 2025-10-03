@@ -1,19 +1,25 @@
 mod monitor;
+mod stats;
+mod  pool;
 use monitor::Monitor;
-
+use dotenvy::dotenv;
 use axum::{
     extract::Query,
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse},
     routing::get,
     Router,
+    extract::Extension
 };
 use serde::Deserialize;
 use std::{path::{Path}, io};
 use tokio::{fs::File, io::AsyncReadExt};
 use zip::write::FileOptions;
 use std::io::Cursor;
-use std::io::Write; 
+use std::io::Write;
+use tokio::sync::mpsc;
+use crate::stats::StatEvent;
+use crate::pool::spawn_stats_pool;
 
 const DATA_DIR: &str = "data";
 
@@ -23,11 +29,14 @@ struct Params {
     name: String,
 }
 
-async fn download_zip(Query(params): Query<Params>) -> impl IntoResponse {
+async fn download_zip(Query(params): Query<Params>, 
+        Extension(tx): Extension<mpsc::Sender<StatEvent>>) -> impl IntoResponse {
     let monitor = Monitor::start();
+    // let _ = tx.send(StatEvent { cpu: 0.0, ram: 0, disk: 0 }).await;
 
     if !is_safe_name(&params.id) || !is_safe_name(&params.name) {
-        monitor.end();
+        let res = monitor.end();
+        let _ = tx.send(res);
         return (StatusCode::BAD_REQUEST, "Invalid id or name".to_string()).into_response();
     }
 
@@ -54,7 +63,8 @@ async fn download_zip(Query(params): Query<Params>) -> impl IntoResponse {
             .into_response(),
     };
 
-    monitor.end();
+    let res = monitor.end();
+    let _ = tx.send(res).await;
 
     resp
 }
@@ -102,7 +112,13 @@ fn is_safe_name(s: &str) -> bool {
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/download", get(download_zip));
+    dotenv().ok();
+    let (tx, rx) = mpsc::channel::<StatEvent>(1000);
+    spawn_stats_pool(rx, 500);
+    let app = Router::new()
+                .route("/download", get(download_zip))
+    .layer(Extension(tx.clone()));
+
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("Server chạy tại http://127.0.0.1:3000");

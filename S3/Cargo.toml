@@ -12,3 +12,6 @@ tokio-util = "0.7"
 serde = { version = "1.0.228", features = ["derive"] }
 walkdir = "2.5.0"
 sysinfo = "0.30"
+crossterm = "0.27"
+tower-http = { version = "0.3", features = ["full"] }
+dotenvy = "0.15"
